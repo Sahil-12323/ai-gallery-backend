@@ -238,18 +238,15 @@ async def get_photo(pid: str):
     if not res.data:
         raise HTTPException(404, "Photo not found")
     return _row_to_photo(res.data[0])
+
+
 @api_router.get("/google/photos")
-async def get_google_photos():
-    global GOOGLE_ACCESS_TOKEN
-
-    if not GOOGLE_ACCESS_TOKEN:
-        raise HTTPException(401, "Not authenticated with Google")
-
+async def get_google_photos(token: str):
     async with httpx.AsyncClient(timeout=15.0) as http:
         r = await http.get(
             GOOGLE_PHOTOS_API,
             headers={
-                "Authorization": f"Bearer {GOOGLE_ACCESS_TOKEN}"
+                "Authorization": f"Bearer {token}"
             },
             params={"pageSize": 50}
         )
@@ -268,6 +265,8 @@ async def get_google_photos():
     ]
 
     return {"photos": photos}
+
+
 @api_router.patch("/photos/{pid}/favorite")
 async def toggle_fav(pid: str):
     res = (supabase.table("photos").select("is_favorite")
@@ -666,12 +665,8 @@ async def google_login():
 
 @api_router.get("/auth/google/callback")
 async def google_callback(code: str = ""):
-    global GOOGLE_ACCESS_TOKEN
-
     if not code:
         return HTMLResponse("<h2>No code received</h2>")
-
-    import httpx
 
     async with httpx.AsyncClient() as http:
         r = await http.post(
@@ -686,12 +681,12 @@ async def google_callback(code: str = ""):
         )
 
     data = r.json()
-    GOOGLE_ACCESS_TOKEN = data.get("access_token")
+    access_token = data.get("access_token")
 
-    return HTMLResponse("""
-    <h2>✅ Connected!</h2>
-    <script>window.close()</script>
-    """)
+    # 🔥 IMPORTANT: redirect back to app with token
+    redirect_url = f"ai-gallery://oauth?token={access_token}"
+
+    return RedirectResponse(redirect_url)
 # ── Import from URL ───────────────────────────────────────────────────────────
 @api_router.post("/photos/import-url")
 async def import_photo_from_url(payload: ImportUrlRequest):
