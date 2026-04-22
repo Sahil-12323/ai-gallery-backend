@@ -16,11 +16,14 @@ from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from groq import AsyncGroq
 from supabase import create_client, Client as SupabaseClient
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("ai_gallery")
+GOOGLE_PHOTOS_API = "https://photoslibrary.googleapis.com/v1/mediaItems"
+GOOGLE_ACCESS_TOKEN = None
 
 SUPABASE_URL   = os.environ["SUPABASE_URL"]
 SUPABASE_KEY   = os.environ["SUPABASE_SERVICE_KEY"]
@@ -235,7 +238,36 @@ async def get_photo(pid: str):
     if not res.data:
         raise HTTPException(404, "Photo not found")
     return _row_to_photo(res.data[0])
+@api_router.get("/google/photos")
+async def get_google_photos():
+    global GOOGLE_ACCESS_TOKEN
 
+    if not GOOGLE_ACCESS_TOKEN:
+        raise HTTPException(401, "Not authenticated with Google")
+
+    async with httpx.AsyncClient(timeout=15.0) as http:
+        r = await http.get(
+            GOOGLE_PHOTOS_API,
+            headers={
+                "Authorization": f"Bearer {GOOGLE_ACCESS_TOKEN}"
+            },
+            params={"pageSize": 50}
+        )
+
+    if r.status_code != 200:
+        raise HTTPException(400, f"Google API error: {r.text}")
+
+    data = r.json()
+
+    photos = [
+        {
+            "id": item["id"],
+            "baseUrl": item["baseUrl"]
+        }
+        for item in data.get("mediaItems", [])
+    ]
+
+    return {"photos": photos}
 @api_router.patch("/photos/{pid}/favorite")
 async def toggle_fav(pid: str):
     res = (supabase.table("photos").select("is_favorite")
@@ -633,17 +665,33 @@ async def google_login():
     return RedirectResponse(url)
 
 @api_router.get("/auth/google/callback")
-async def google_callback(code: str = "", error: str = "", state: str = "", scope: str = "", iss: str = ""):
-    if error:
-        return HTMLResponse(f"<h2>Auth error: {error}</h2><script>window.close()</script>")
-    return HTMLResponse(f"""<!DOCTYPE html><html><head><title>AI Gallery</title>
-<style>body{{background:#050505;color:#F5F5F7;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
-.c{{text-align:center}}.s{{width:40px;height:40px;border:3px solid #333;border-top-color:#FF8C94;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}</style></head>
-<body><div class="c"><div class="s"></div><h2>✅ Connected!</h2><p>Returning to AI Gallery…</p></div>
-<script>try{{if(window.opener){{window.opener.postMessage({{code:{json.dumps(code)},state:{json.dumps(state)}}},'*');setTimeout(()=>window.close(),800)}}else{{setTimeout(()=>window.close(),1200)}}}}catch(e){{window.close()}}</script>
-</body></html>""")
+async def google_callback(code: str = ""):
+    global GOOGLE_ACCESS_TOKEN
 
+    if not code:
+        return HTMLResponse("<h2>No code received</h2>")
+
+    import httpx
+
+    async with httpx.AsyncClient() as http:
+        r = await http.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": os.getenv("GOOGLE_REDIRECT_URI"),
+                "grant_type": "authorization_code",
+            },
+        )
+
+    data = r.json()
+    GOOGLE_ACCESS_TOKEN = data.get("access_token")
+
+    return HTMLResponse("""
+    <h2>✅ Connected!</h2>
+    <script>window.close()</script>
+    """)
 # ── Import from URL ───────────────────────────────────────────────────────────
 @api_router.post("/photos/import-url")
 async def import_photo_from_url(payload: ImportUrlRequest):
