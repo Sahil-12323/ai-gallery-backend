@@ -1,0 +1,20 @@
+# AI Gallery v2.0 — Supabase + Google Photos edition
+fastapi==0.110.1
+uvicorn==0.25.0
+starlette==0.37.2
+python-dotenv==1.1.0
+python-multipart==0.0.24
+pydantic==2.12.5
+
+# Supabase
+supabase==2.15.2
+gotrue==2.12.0
+postgrest==1.0.1
+storage3==0.11.3
+realtime==2.4.3
+
+# HTTP (for image download + Google OAuth)
+httpx==0.28.1
+
+# AI
+groq==1.2.0
